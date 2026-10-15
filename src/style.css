@@ -1,0 +1,92 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: system-ui, Arial, sans-serif;
+  background: #1a1a2e;
+}
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  padding-top: 12px;
+  gap: 8px;
+}
+#soup-box {
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 12px;
+  text-align: center;
+  min-width: 240px;
+}
+#soup-label {
+  font-size: 22px;
+  font-weight: bold;
+}
+#soup-bar-bg {
+  width: 220px;
+  height: 14px;
+  background: #444;
+  border-radius: 7px;
+  margin: 8px auto 4px;
+  overflow: hidden;
+}
+#soup-bar {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ff8c00, #ff4400);
+  border-radius: 7px;
+  transition: width 0.3s;
+}
+#tilt-label {
+  font-size: 13px;
+  color: #ffdd88;
+}
+#controls {
+  background: rgba(0, 0, 0, 0.45);
+  color: #eee;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 8px;
+}
+#message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 32px 48px;
+  border-radius: 16px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: bold;
+}
+#message.hidden {
+  display: none;
+}
+#restart {
+  display: block;
+  margin: 18px auto 0;
+  font-size: 18px;
+  padding: 10px 28px;
+  border: none;
+  border-radius: 10px;
+  background: #ff8c00;
+  color: white;
+  cursor: pointer;
+}
+#restart:hover {
+  background: #ff6600;
+}
