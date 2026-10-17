@@ -1,12 +1,19 @@
 import * as THREE from 'three';
 import './style.css';
+import { createRestaurant } from './environment';
+import { createWaiter } from './waiter';
+import { createSpillFx } from './spill-fx';
+import { getPlayer, watchPlayer, signInUrl } from './startng';
 
 // ---------- Config ----------
 const SPILL_THRESHOLD = 0.35; // rad of combined tilt that causes a spill
-const SPILL_AMOUNT = 10; // percentage points lost per spill
-const SPILL_COOLDOWN = 1.0; // seconds
+const SPILL_AMOUNTS = [1, 1, 2] as const; // percentage points lost per spill (1-2%, not 10%)
+const SPILL_COOLDOWN = 0.9; // seconds between spill events (never one per frame)
 const MOVE_SPEED = 6;
 const BALANCE_SPEED = 1.6; // rad/s for Q/E
+const TURN_RATE_REF = 8; // rad/s counted as a "sharp" turn
+const ACCEL_REF = 36; // velocity impulse of an abrupt start/stop (frame-rate independent)
+const ACCEL_SMOOTH = 6; // decay rate of the measured impulse (units/s)
 const FLOOR_W = 22;
 const FLOOR_L = 30;
 const START_POS = new THREE.Vector3(0, 0, 12);
@@ -16,164 +23,62 @@ const TABLE_POS = new THREE.Vector3(0, 0, -12);
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
+scene.background = new THREE.Color(0x241a13);
+scene.fog = new THREE.FogExp2(0x3d2c1e, 0.016);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-sun.position.set(8, 15, 8);
-sun.castShadow = true;
-scene.add(sun);
+// ---------- Restaurant (floor, walls, tables, chairs, lights, decor) ----------
+const restaurant = createRestaurant({ width: FLOOR_W, length: FLOOR_L, target: TABLE_POS });
+scene.add(restaurant.root);
 
-// ---------- Kitchen: floor + table ----------
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(FLOOR_W, FLOOR_L),
-  new THREE.MeshLambertMaterial({ color: 0xf5deb3 })
-);
-floor.rotation.x = -Math.PI / 2;
-floor.receiveShadow = true;
-scene.add(floor);
+// ---------- Waiter (model + procedural walk animation) ----------
+const waiter = createWaiter();
+const player = waiter.root; // movement code owns player.position / rotation.y
+const { trayGroup, soupMesh } = waiter;
+player.position.copy(START_POS);
+player.rotation.y = Math.PI; // face the table (-z)
+scene.add(player);
 
-// Simple tile lines for kitchen feel
-const grid = new THREE.GridHelper(Math.max(FLOOR_W, FLOOR_L), 22, 0xcc9966, 0xddbb88);
-grid.position.y = 0.01;
-scene.add(grid);
+// Spill visuals: droplets, puddle stains and a splash ring.
+const spillFx = createSpillFx(scene);
 
-// Table at far end (target)
-const table = new THREE.Group();
-const woodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
-const tableTop = new THREE.Mesh(new THREE.BoxGeometry(5, 0.4, 2.5), woodMat);
-tableTop.position.y = 1.0;
-tableTop.castShadow = true;
-table.add(tableTop);
-const legGeo = new THREE.BoxGeometry(0.3, 1.0, 0.3);
-for (const [lx, lz] of [[-2.2, -1], [2.2, -1], [-2.2, 1], [2.2, 1]] as const) {
-  const leg = new THREE.Mesh(legGeo, woodMat);
-  leg.position.set(lx, 0.5, lz);
-  table.add(leg);
-}
-// Tablecloth marker / target zone
-const zone = new THREE.Mesh(
-  new THREE.RingGeometry(1.4, 2.0, 32),
-  new THREE.MeshBasicMaterial({ color: 0x00cc44, side: THREE.DoubleSide })
-);
-zone.rotation.x = -Math.PI / 2;
-zone.position.y = 0.02;
-table.add(zone);
-table.position.copy(TABLE_POS);
-scene.add(table);
-
-// Back wall for kitchen feel
-const wall = new THREE.Mesh(
-  new THREE.BoxGeometry(FLOOR_W, 5, 0.5),
-  new THREE.MeshLambertMaterial({ color: 0xffe4c4 })
-);
-wall.position.set(0, 2.5, -FLOOR_L / 2 - 0.5);
-scene.add(wall);
-
-// ---------- Cartoon chef ----------
-const chef = new THREE.Group();
-
-const skinMat = new THREE.MeshLambertMaterial({ color: 0xffcc99 });
-const coatMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-const hatMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-const pantsMat = new THREE.MeshLambertMaterial({ color: 0x333388 });
-
-const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 1.2, 16), coatMat);
-body.position.y = 1.1;
-body.castShadow = true;
-chef.add(body);
-
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 20, 16), skinMat);
-head.position.y = 2.0;
-head.castShadow = true;
-chef.add(head);
-
-// Eyes
-const eyeMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
-for (const ex of [-0.15, 0.15]) {
-  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), eyeMat);
-  eye.position.set(ex, 2.05, 0.36);
-  chef.add(eye);
-}
-
-// Chef hat: brim + puffy top
-const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.15, 16), hatMat);
-brim.position.y = 2.35;
-chef.add(brim);
-const puff = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), hatMat);
-puff.position.y = 2.65;
-puff.scale.y = 0.8;
-chef.add(puff);
-
-// Legs
-for (const lx of [-0.25, 0.25]) {
-  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.6, 10), pantsMat);
-  leg.position.set(lx, 0.3, 0);
-  chef.add(leg);
-}
-
-// Arms reaching forward holding tray
-const armGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.9, 10);
-for (const ax of [-0.5, 0.5]) {
-  const arm = new THREE.Mesh(armGeo, coatMat);
-  arm.position.set(ax, 1.35, 0.45);
-  arm.rotation.x = Math.PI / 2 - 0.25;
-  chef.add(arm);
-}
-
-// ---------- Tray + bowl + soup (attached to chef) ----------
-const trayGroup = new THREE.Group();
-trayGroup.position.set(0, 1.45, 1.1); // held in front of chef
-chef.add(trayGroup);
-
-const tray = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.85, 0.85, 0.08, 24),
-  new THREE.MeshLambertMaterial({ color: 0xcccccc })
-);
-tray.castShadow = true;
-trayGroup.add(tray);
-
-const bowl = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.55, 0.35, 0.35, 20),
-  new THREE.MeshLambertMaterial({ color: 0x2266cc })
-);
-bowl.position.y = 0.22;
-trayGroup.add(bowl);
-
-// Soup surface: orange circle inside bowl
-const soupMesh = new THREE.Mesh(
-  new THREE.CircleGeometry(0.48, 24),
-  new THREE.MeshLambertMaterial({ color: 0xff5500 })
-);
-soupMesh.rotation.x = -Math.PI / 2;
-soupMesh.position.y = 0.40; // level with the rim so the surface stays visible
-trayGroup.add(soupMesh);
-
-chef.position.copy(START_POS);
-scene.add(chef);
-
-// Spill droplets pool (simple visual: orange spheres that fall and fade)
-const droplets: { mesh: THREE.Mesh; vel: number; life: number }[] = [];
-const dropletGeo = new THREE.SphereGeometry(0.09, 8, 8);
-const dropletMat = new THREE.MeshBasicMaterial({ color: 0xff5500 });
+const spillPos = new THREE.Vector3();
 
 function spawnSpill() {
-  for (let i = 0; i < 6; i++) {
-    const m = new THREE.Mesh(dropletGeo, dropletMat);
-    const worldPos = new THREE.Vector3();
-    soupMesh.getWorldPosition(worldPos);
-    m.position.copy(worldPos);
-    m.position.x += (Math.random() - 0.5) * 0.6;
-    m.position.z += (Math.random() - 0.5) * 0.6;
-    scene.add(m);
-    droplets.push({ mesh: m, vel: 0, life: 1.2 });
-  }
+  waiter.soupWorldPosition(spillPos);
+  spillFx.splash(spillPos, 0.7);
+  spillFx.spawn(spillPos, 0.6);
 }
+
+// ---------- start.ng player character ----------
+// Optional: falls back to the default waiter whenever start.ng does not answer.
+function applyPlayer(playerInfo: Awaited<ReturnType<typeof getPlayer>>): void {
+  if (playerInfo?.style) waiter.setStyle(playerInfo.style);
+  const chip = document.getElementById('player-chip');
+  const nameEl = document.getElementById('player-name');
+  const signInEl = document.getElementById('player-signin') as HTMLAnchorElement | null;
+  if (!chip || !nameEl) return;
+  if (!playerInfo) {
+    chip.classList.add('hidden');
+    return;
+  }
+  nameEl.textContent = playerInfo.name;
+  if (signInEl) {
+    signInEl.hidden = playerInfo.signedIn;
+    signInEl.href = signInUrl();
+  }
+  chip.classList.remove('hidden');
+}
+void getPlayer().then(applyPlayer);
+watchPlayer(applyPlayer);
 
 // ---------- Input ----------
 const keys = new Set<string>();
@@ -199,6 +104,9 @@ let sloshVel = 0;
 let spillTimer = 0;
 let gameOver: 'win' | 'lose' | null = null;
 let elapsed = 0;
+let prevVx = 0; // input velocity of the previous frame (abrupt stop/turn detection)
+let prevVz = 0;
+let accelImpulse = 0; // smoothed velocity impulse, decays over ~0.5 s
 
 function restart() {
   soup = 100;
@@ -206,15 +114,18 @@ function restart() {
   slosh = 0;
   sloshVel = 0;
   spillTimer = 0;
+  prevVx = 0;
+  prevVz = 0;
+  accelImpulse = 0;
   gameOver = null;
   elapsed = 0;
-  chef.position.copy(START_POS);
-  chef.rotation.y = Math.PI; // face the table (-z)
+  player.position.copy(START_POS);
+  player.rotation.y = Math.PI; // face the table (-z)
   trayGroup.rotation.z = 0; // snap tray visual back (loop would only lerp it)
   soupMesh.rotation.set(-Math.PI / 2, 0, 0);
   soupMesh.scale.set(1, 1, 1);
-  for (const d of droplets) scene.remove(d.mesh);
-  droplets.length = 0;
+  waiter.setSoupLevel(1);
+  spillFx.clear();
   messageEl.classList.add('hidden');
   updateUI(0);
 }
@@ -238,7 +149,17 @@ function endGame(result: 'win' | 'lose') {
 
 // ---------- Main loop ----------
 const clock = new THREE.Clock();
-const camOffset = new THREE.Vector3(0, 8.5, 8.5);
+// Follow camera: pulled in and lowered from the original (0, 8.5, 8.5) so the
+// waiter reads clearly (verified with tools/cdp-shots.mjs, see §4 of the comms file).
+// Still above the 5-unit ceiling line, so the cutaway tricks in environment.ts hold.
+const camOffset = new THREE.Vector3(0, 6.6, 7.2);
+
+function angleDiff(a: number, b: number): number {
+  let diff = a - b;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return diff;
+}
 
 function animate() {
   requestAnimationFrame(animate);
@@ -246,6 +167,10 @@ function animate() {
   elapsed += dt;
 
   if (!gameOver) {
+    const prevX = player.position.x;
+    const prevZ = player.position.z;
+    const prevYaw = player.rotation.y;
+
     // --- Movement (WASD / arrows), camera-relative = world axes ---
     let ix = 0;
     let iz = 0;
@@ -258,17 +183,30 @@ function animate() {
     const vz = (iz / len) * MOVE_SPEED;
     const moving = ix !== 0 || iz !== 0;
 
-    chef.position.x = THREE.MathUtils.clamp(chef.position.x + vx * dt, -FLOOR_W / 2 + 1, FLOOR_W / 2 - 1);
-    chef.position.z = THREE.MathUtils.clamp(chef.position.z + vz * dt, -FLOOR_L / 2 + 1, FLOOR_L / 2 - 1);
+    // Sudden start / stop / direction change: an impulse that decays smoothly.
+    // (invDt is 0 when dt is 0, so a zero delta can never produce NaN.)
+    const invDt = dt > 0 ? 1 / dt : 0;
+    const instAccel = Math.hypot(vx - prevVx, vz - prevVz) * invDt;
+    accelImpulse += (instAccel - accelImpulse) * Math.min(1, ACCEL_SMOOTH * dt);
+    prevVx = vx;
+    prevVz = vz;
+
+    player.position.x = THREE.MathUtils.clamp(player.position.x + vx * dt, -FLOOR_W / 2 + 1, FLOOR_W / 2 - 1);
+    player.position.z = THREE.MathUtils.clamp(player.position.z + vz * dt, -FLOOR_L / 2 + 1, FLOOR_L / 2 - 1);
 
     // Face movement direction
     if (moving) {
       const targetYaw = Math.atan2(vx, vz);
-      let diff = targetYaw - chef.rotation.y;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      chef.rotation.y += diff * Math.min(1, 10 * dt);
+      const diff = angleDiff(targetYaw, player.rotation.y);
+      player.rotation.y += diff * Math.min(1, 10 * dt);
     }
+
+    // --- Waiter animation: legs, arms, body bob, turn banking ---
+    // invDt guard (Agent B's 14:38 request): dt can be 0 on the first frame,
+    // and 0/0 = NaN would poison the rig. invDt is defined in the block above.
+    const speed = Math.hypot(player.position.x - prevX, player.position.z - prevZ) * invDt;
+    const turnRate = angleDiff(player.rotation.y, prevYaw) * invDt;
+    waiter.update(dt, { speed, turnRate, moving, lookAt: restaurant.target });
 
     // --- Tray balance (Q/E) ---
     if (keys.has('q')) trayTilt -= BALANCE_SPEED * dt;
@@ -276,10 +214,9 @@ function animate() {
     trayTilt = THREE.MathUtils.clamp(trayTilt, -0.5, 0.5);
 
     // --- Soup tilt simulation ---
-    // Strafing induces roll; wobble forces constant small corrections.
+    // Strafing induces roll; balance is player-controlled via Q/E.
     const moveTiltZ = moving ? THREE.MathUtils.clamp(-vx * 0.09, -0.45, 0.45) : 0;
-    const wobble = Math.sin(elapsed * 2.5) * 0.06 + Math.sin(elapsed * 3.7) * 0.04;
-    const totalTilt = trayTilt + moveTiltZ + wobble;
+    const totalTilt = trayTilt + moveTiltZ;
 
     // Smooth slosh spring for visual lag
     const target = THREE.MathUtils.clamp(-totalTilt * 0.8, -0.5, 0.5);
@@ -296,11 +233,25 @@ function animate() {
     // Shrink soup slightly as it depletes
     const s = 0.4 + 0.6 * (soup / 100);
     soupMesh.scale.set(s, s, 1);
+    waiter.setSoupLevel(soup / 100);
 
     // --- Spilling ---
+    // Pressure model: tilt dominates (so strafing/balance still matter), while
+    // sharp turns and abrupt stops only cause a spill when the tray is already
+    // noticeably off balance. Ordinary walking stays under the threshold.
     spillTimer -= dt;
-    if (Math.abs(totalTilt) > SPILL_THRESHOLD && spillTimer <= 0) {
-      soup = Math.max(0, soup - SPILL_AMOUNT);
+    const tiltComponent = Math.abs(totalTilt) / SPILL_THRESHOLD; // 1.0 = at threshold
+    const turnComponent = Math.min(1, Math.abs(turnRate) / TURN_RATE_REF);
+    const accelComponent = Math.min(1, accelImpulse / ACCEL_REF);
+    const maneuver = Math.max(turnComponent, accelComponent);
+    const spillNow =
+      spillTimer <= 0 &&
+      (tiltComponent >= 1 || (tiltComponent >= 0.6 && maneuver >= 0.7));
+    if (spillNow) {
+      // Small spills: mostly 1%, occasionally 2%; a really hard jolt spills 2%.
+      const hardEvent = tiltComponent >= 1.5 || maneuver >= 1;
+      const amount = hardEvent ? 2 : SPILL_AMOUNTS[Math.floor(Math.random() * SPILL_AMOUNTS.length)];
+      soup = THREE.MathUtils.clamp(soup - amount, 0, 100);
       spillTimer = SPILL_COOLDOWN;
       spawnSpill();
     }
@@ -308,30 +259,24 @@ function animate() {
     updateUI(totalTilt);
 
     // --- Win / lose ---
-    const distToTable = chef.position.distanceTo(TABLE_POS);
+    const distToTable = player.position.distanceTo(restaurant.target);
     if (soup <= 0) {
       endGame('lose');
-    } else if (distToTable < 2.6) {
+    } else if (distToTable < restaurant.targetRadius) {
       endGame('win');
     }
   }
 
-  // --- Droplets fall ---
-  for (let i = droplets.length - 1; i >= 0; i--) {
-    const d = droplets[i];
-    d.vel += 12 * dt;
-    d.mesh.position.y -= d.vel * dt;
-    d.life -= dt;
-    if (d.mesh.position.y < 0.05 || d.life <= 0) {
-      scene.remove(d.mesh);
-      droplets.splice(i, 1);
-    }
-  }
+  // --- Restaurant ambience + spill particles ---
+  // camera.position lets the restaurant hide its near wall when the follow
+  // camera is outside the room (optional third arg, see environment.ts).
+  restaurant.update(dt, elapsed, camera.position);
+  spillFx.update(dt);
 
   // --- Follow camera ---
-  const desired = chef.position.clone().add(camOffset);
+  const desired = player.position.clone().add(camOffset);
   camera.position.lerp(desired, Math.min(1, 4 * dt));
-  camera.lookAt(chef.position.x, 1.2, chef.position.z - 2);
+  camera.lookAt(player.position.x, 1.2, player.position.z - 2);
 
   renderer.render(scene, camera);
 }
@@ -344,4 +289,25 @@ window.addEventListener('resize', () => {
 
 restart();
 camera.position.copy(START_POS).add(camOffset); // avoid opening swoop from origin
+
+// Read-only handle for the automated smoke test (tools/cdp-smoke.mjs).
+// Exposes state only; it can never change how the game plays.
+(window as unknown as { __soupGame?: object }).__soupGame = {
+  get position() {
+    const p = player.position;
+    return { x: p.x, y: p.y, z: p.z };
+  },
+  get soup() {
+    return soup;
+  },
+  get state() {
+    return gameOver;
+  },
+};
+
+// Diagnostics, only with ?debug — never active in normal play.
+if (new URLSearchParams(location.search).has('debug')) {
+  (window as unknown as { __soupDebug?: object }).__soupDebug = { camera, player, scene, renderer };
+}
+
 animate();

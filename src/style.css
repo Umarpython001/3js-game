@@ -60,6 +60,34 @@ html, body {
   padding: 6px 14px;
   border-radius: 8px;
 }
+#player-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 999px;
+}
+#player-chip.hidden {
+  display: none;
+}
+.chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff8c00;
+}
+#player-signin {
+  color: #ffd08a;
+  text-decoration: none;
+  font-weight: bold;
+}
+#player-signin:hover {
+  text-decoration: underline;
+}
 #message {
   position: fixed;
   top: 50%;

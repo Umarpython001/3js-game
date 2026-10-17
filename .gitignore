@@ -8,9 +8,11 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist/ is committed on purpose: start.ng serves the built game and never runs a build.
 dist-ssr
 *.local
+# local agent artifacts (screenshot QA loops)
+.shots/
 
 # Editor directories and files
 .vscode/*

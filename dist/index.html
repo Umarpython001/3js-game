@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Don't Spill the Soup!</title>
+    <script type="module" crossorigin src="./assets/index--XrOJb5l.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BDJawoUT.css">
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div id="soup-box">
+        <div id="soup-label">🍲 SOUP: <span id="soup-pct">100%</span></div>
+        <div id="soup-bar-bg"><div id="soup-bar"></div></div>
+        <div id="tilt-label">TILT: <span id="tilt-pct">0°</span></div>
+      </div>
+      <div id="controls">WASD / Arrows: move &nbsp;•&nbsp; Q / E: balance tray &nbsp;•&nbsp; Reach the table!</div>
+      <div id="player-chip" class="hidden">
+        <span class="chip-dot"></span>
+        <span id="player-name">Guest</span>
+        <a id="player-signin" href="https://start.ng/" hidden>Sign in</a>
+      </div>
+    </div>
+
+    <div id="message" class="hidden">
+      <div id="message-text"></div>
+      <button id="restart">Restart (R)</button>
+    </div>
+
+  </body>
+</html>
